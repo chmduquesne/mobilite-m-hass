@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Rechercher un arrêt",
+        "description": "Entrez le nom d'un arrêt ou d'une zone d'arrêt (minimum 3 caractères).",
+        "data": {
+          "stop_query": "Nom de l'arrêt"
+        }
+      },
+      "select_cluster": {
+        "title": "Choisir la zone d'arrêt",
+        "description": "Sélectionnez la zone d'arrêt souhaitée parmi les résultats.",
+        "data": {
+          "cluster": "Zone d'arrêt"
+        }
+      },
+      "select_routes": {
+        "title": "Filtrer les lignes",
+        "description": "Choisissez les lignes à surveiller (laissez vide pour toutes les lignes) et le nombre de prochains départs à afficher.",
+        "data": {
+          "route_filter": "Lignes (optionnel)",
+          "nb_departures": "Nombre de prochains départs"
+        }
+      }
+    },
+    "error": {
+      "query_too_short": "La recherche doit contenir au moins 3 caractères.",
+      "no_results": "Aucun arrêt trouvé. Essayez un autre terme de recherche.",
+      "cannot_connect": "Impossible de se connecter à l'API Mobilités-M."
+    },
+    "abort": {
+      "already_configured": "Cette zone d'arrêt (avec ce filtre de lignes) est déjà configurée."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "departure": {
+        "name": "Départ {index}"
+      }
+    }
+  }
+}

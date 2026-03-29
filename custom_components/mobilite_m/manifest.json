@@ -1,0 +1,10 @@
+{
+  "domain": "mobilite_m",
+  "name": "Mobilités-M (Grenoble)",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://data.mobilites-m.fr/donnees",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "codeowners": []
+}

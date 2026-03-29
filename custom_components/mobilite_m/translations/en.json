@@ -1,0 +1,36 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Search for a stop",
+        "description": "Enter the name of a stop or stop cluster (minimum 3 characters).",
+        "data": {
+          "stop_query": "Stop name"
+        }
+      },
+      "select_cluster": {
+        "title": "Choose stop cluster",
+        "description": "Select the desired stop cluster from the results.",
+        "data": {
+          "cluster": "Stop cluster"
+        }
+      },
+      "select_routes": {
+        "title": "Filter routes",
+        "description": "Choose the transit lines to monitor (leave empty for all lines) and how many upcoming departures to display.",
+        "data": {
+          "route_filter": "Lines (optional)",
+          "nb_departures": "Number of upcoming departures"
+        }
+      }
+    },
+    "error": {
+      "query_too_short": "Search must be at least 3 characters.",
+      "no_results": "No stops found. Try a different search term.",
+      "cannot_connect": "Unable to connect to the Mobilités-M API."
+    },
+    "abort": {
+      "already_configured": "This stop cluster (with this line filter) is already configured."
+    }
+  }
+}
