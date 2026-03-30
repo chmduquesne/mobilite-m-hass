@@ -71,9 +71,13 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
                 params=params,
                 headers={"Origin": ORIGIN_HEADER},
             ) as resp:
+                if resp.status == 204:
+                    return []
                 if resp.status != 200:
                     raise UpdateFailed(f"API returned status {resp.status}")
                 data = await resp.json(content_type=None)
+        except UpdateFailed:
+            raise
         except Exception as err:
             raise UpdateFailed(f"Error fetching departures: {err}") from err
 
