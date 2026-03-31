@@ -101,10 +101,9 @@ def _parse_departures(
     for entry in raw:
         pattern = entry.get("pattern", {})
         pattern_id = pattern.get("id", "")
-        parts = pattern_id.split(":")
-        line = parts[1] if len(parts) > 1 else pattern_id
+        line = pattern_id.split(":")[1] if ":" in pattern_id else pattern_id
         direction = pattern.get("desc", "")
-        if direction_set and direction not in direction_set:
+        if direction_set and f"{line}|{direction}" not in direction_set:
             continue
 
         for time_entry in entry.get("times", []):

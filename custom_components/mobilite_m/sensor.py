@@ -77,10 +77,11 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
         }
 
     def _departures_for_direction(self) -> list[dict]:
+        line, _, desc = self._direction.partition("|")
         return [
             dep
             for dep in (self.coordinator.data or [])
-            if dep.get("direction") == self._direction
+            if dep.get("line") == line and dep.get("direction") == desc
         ]
 
     @property

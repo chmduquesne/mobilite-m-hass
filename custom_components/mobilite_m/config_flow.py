@@ -24,6 +24,24 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_MODE_LABELS = {
+    "BUS": "Bus",
+    "TRAM": "Tram",
+    "RAIL": "Train",
+    "SUBWAY": "Metro",
+    "FERRY": "Ferry",
+    "FUNICULAR": "Funicular",
+    "CABLE_CAR": "Cable car",
+}
+
+
+async def _get_json(coro, default=None):
+    """Await a aiohttp request coroutine and return parsed JSON, or default on error."""
+    if default is None:
+        default = {}
+    async with coro as resp:
+        return await resp.json(content_type=None) if resp.status == 200 else default
+
 
 class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Mobilités-M."""
@@ -177,27 +195,13 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         "Bus stop: 17 → Montfleury, N62 → Col de Porte".
         """
         session = async_get_clientsession(self.hass)
+        headers = {"Origin": ORIGIN_HEADER}
         try:
-            stops_resp, patterns_resp, routes_resp = await asyncio.gather(
-                session.get(
-                    f"{BASE_URL}/api/clusters/{cluster_code}/stops",
-                    headers={"Origin": ORIGIN_HEADER},
-                ),
-                session.get(
-                    f"{BASE_URL}/api/clusters/{cluster_code}/patterns",
-                    headers={"Origin": ORIGIN_HEADER},
-                ),
-                session.get(
-                    f"{BASE_URL}/api/routers/default/index/clusters/{cluster_code}/routes",
-                    headers={"Origin": ORIGIN_HEADER},
-                ),
+            stops_data, patterns_data, routes_data = await asyncio.gather(
+                _get_json(session.get(f"{BASE_URL}/api/clusters/{cluster_code}/stops", headers=headers)),
+                _get_json(session.get(f"{BASE_URL}/api/clusters/{cluster_code}/patterns", headers=headers)),
+                _get_json(session.get(f"{BASE_URL}/api/routers/default/index/clusters/{cluster_code}/routes", headers=headers), default=[]),
             )
-            async with stops_resp:
-                stops_data = await stops_resp.json(content_type=None) if stops_resp.status == 200 else {}
-            async with patterns_resp:
-                patterns_data = await patterns_resp.json(content_type=None) if patterns_resp.status == 200 else {}
-            async with routes_resp:
-                routes_data = await routes_resp.json(content_type=None) if routes_resp.status == 200 else []
         except Exception:
             _LOGGER.exception("Error fetching stops for cluster %s", cluster_code)
             return {}
@@ -230,16 +234,6 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             dominant_mode = max(mode_counts, key=mode_counts.get) if mode_counts else ""
             stop_info[stop_id] = (dominant_mode, dests)
 
-        _MODE_LABELS = {
-            "BUS": "Bus",
-            "TRAM": "Tram",
-            "RAIL": "Train",
-            "SUBWAY": "Metro",
-            "FERRY": "Ferry",
-            "FUNICULAR": "Funicular",
-            "CABLE_CAR": "Cable car",
-        }
-
         result: dict[str, str] = {}
         for feature in stops_data.get("features", []):
             props = feature.get("properties", {})
@@ -260,29 +254,25 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         cluster_code: str,
         stop_filter: list[str],
     ) -> dict[str, str]:
-        """Fetch available directions, returning {desc: "line - desc"}.
+        """Fetch available directions, returning {"line|desc": "line → desc"}.
 
-        The key (desc) is used for filtering in the coordinator.
-        The value is the human-readable label shown in the UI.
-        If the same destination is served by multiple lines,
-        all line numbers are included: "17, N62 - Col de Porte".
+        Each unique (line, destination) pair becomes one entry.
+        The key is used for filtering in the coordinator; the value is the UI label.
         """
         session = async_get_clientsession(self.hass)
         try:
-            async with session.get(
-                f"{BASE_URL}/api/clusters/{cluster_code}/patterns",
-                headers={"Origin": ORIGIN_HEADER},
-            ) as resp:
-                if resp.status != 200:
-                    return {}
-                data = await resp.json(content_type=None)
+            data = await _get_json(
+                session.get(
+                    f"{BASE_URL}/api/clusters/{cluster_code}/patterns",
+                    headers={"Origin": ORIGIN_HEADER},
+                )
+            )
         except Exception:
             _LOGGER.exception("Error fetching patterns for cluster %s", cluster_code)
             return {}
 
         stop_set = set(stop_filter) if stop_filter else None
-        # {desc: set of line names}
-        desc_lines: dict[str, set[str]] = {}
+        pairs: dict[tuple[str, str], None] = {}
         for stop_id, patterns in data.items():
             if stop_set and stop_id not in stop_set:
                 continue
@@ -290,10 +280,10 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 pattern_id = pattern.get("id", "")
                 line = pattern_id.split(":")[1] if ":" in pattern_id else ""
                 desc = pattern.get("desc", "")
-                if desc:
-                    desc_lines.setdefault(desc, set()).add(line)
+                if line and desc:
+                    pairs[(line, desc)] = None
 
         return {
-            desc: f"{', '.join(sorted(lines))} → {desc}"
-            for desc, lines in desc_lines.items()
+            f"{line}|{desc}": f"{line} → {desc}"
+            for (line, desc) in pairs
         }
