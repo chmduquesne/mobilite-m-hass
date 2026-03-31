@@ -14,10 +14,9 @@ from .const import (
     CONF_CLUSTER_NAME,
     CONF_DIRECTION_FILTER,
     DOMAIN,
+    NB_SLOTS,
 )
 from . import MobiliteMCoordinator
-
-_NB_SLOTS = 3
 
 
 async def async_setup_entry(
@@ -41,7 +40,7 @@ async def async_setup_entry(
     async_add_entities(
         MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, direction, label, i)
         for direction, label in directions.items()
-        for i in range(_NB_SLOTS)
+        for i in range(NB_SLOTS)
     )
 
 
@@ -86,9 +85,14 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self) -> str:
+        deps = self._departures_for_direction()
+        if self._index < len(deps) and deps[self._index].get("from_calendar"):
+            suffix = " (scheduled)"
+        else:
+            suffix = ""
         if self._index == 0:
-            return self._label
-        return f"{self._label} {self._index + 1}"
+            return f"{self._label}{suffix}"
+        return f"{self._label} {self._index + 1}{suffix}"
 
     @property
     def native_value(self) -> datetime | None:

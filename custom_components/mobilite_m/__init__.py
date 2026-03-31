@@ -1,8 +1,9 @@
 """Mobilités-M integration for Home Assistant."""
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from yarl import URL
 
@@ -13,11 +14,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     BASE_URL,
+    CONF_AVAILABLE_DIRECTIONS,
     CONF_CLUSTER_CODE,
     CONF_DIRECTION_FILTER,
     CONF_STOP_FILTER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    NB_SLOTS,
     ORIGIN_HEADER,
 )
 
@@ -30,9 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Mobilités-M from a config entry."""
     coordinator = MobiliteMCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -43,6 +44,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
     return unload_ok
+
+
+async def _fetch_stop_stoptimes(session, stop_id: str, date_str: str) -> list:
+    """Fetch scheduled stoptimes for a stop on a given YYYYMMDD date."""
+    url = f"{BASE_URL}/api/routers/default/index/stops/{stop_id}/stoptimes/{date_str}"
+    try:
+        async with session.get(
+            URL(url, encoded=True),
+            headers={"Origin": ORIGIN_HEADER},
+        ) as resp:
+            return await resp.json(content_type=None) if resp.status == 200 else []
+    except Exception:
+        return []
 
 
 class MobiliteMCoordinator(DataUpdateCoordinator):
@@ -59,11 +73,38 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         self._cluster_code = entry.data[CONF_CLUSTER_CODE]
         self._stop_filter: list[str] = entry.data.get(CONF_STOP_FILTER, [])
         self._direction_filter: list[str] = entry.data.get(CONF_DIRECTION_FILTER, [])
+        available: dict[str, str] = entry.data.get(CONF_AVAILABLE_DIRECTIONS, {})
+        # All (line, direction) pairs that have sensors — used to detect gaps in real-time data.
+        self._tracked: set[tuple[str, str]] = {
+            (k.split("|")[0], k.split("|")[1])
+            for k in (self._direction_filter if self._direction_filter else available)
+        }
+        self._stop_ids: list[str] | None = None
+
+    async def _ensure_stop_ids(self) -> list[str]:
+        """Return stop IDs for the cluster, fetching from the API once if needed."""
+        if self._stop_filter:
+            return self._stop_filter
+        if self._stop_ids is None:
+            try:
+                async with self._session.get(
+                    f"{BASE_URL}/api/clusters/{self._cluster_code}/stops",
+                    headers={"Origin": ORIGIN_HEADER},
+                ) as resp:
+                    data = await resp.json(content_type=None) if resp.status == 200 else {}
+            except Exception:
+                return []
+            self._stop_ids = [
+                props.get("id") or props.get("gtfsId")
+                for f in data.get("features", [])
+                if (props := f.get("properties", {}))
+                and (props.get("id") or props.get("gtfsId"))
+            ]
+        return self._stop_ids
 
     async def _async_update_data(self) -> list[dict]:
-        """Fetch next departures from the API."""
+        """Fetch next departures from the API, falling back to scheduled data if needed."""
         url = f"{BASE_URL}/api/routers/default/index/clusters/{self._cluster_code}/stoptimes"
-
         try:
             _LOGGER.debug("Fetching departures from %s", url)
             async with self._session.get(
@@ -81,7 +122,140 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         except Exception as err:
             raise UpdateFailed(f"Error fetching departures: {err}") from err
 
-        return _parse_departures(data, self._stop_filter, self._direction_filter)
+        departures = _parse_departures(data, self._stop_filter, self._direction_filter)
+        return await self._fill_scheduled(departures)
+
+    async def _fill_scheduled(self, departures: list[dict]) -> list[dict]:
+        """Append scheduled departures for any tracked (line, direction) with fewer than NB_SLOTS entries.
+
+        Iterates through successive days (up to 14) until every tracked direction
+        has NB_SLOTS departures or we run out of days to check.
+        """
+        def _counts(deps: list[dict]) -> dict[tuple[str, str], int]:
+            c: dict[tuple[str, str], int] = {}
+            for dep in deps:
+                key = (dep["line"], dep["direction"])
+                c[key] = c.get(key, 0) + 1
+            return c
+
+        needs_more = {pair for pair in self._tracked if _counts(departures).get(pair, 0) < NB_SLOTS}
+        if not needs_more:
+            return departures
+
+        stop_ids = await self._ensure_stop_ids()
+        if not stop_ids:
+            return departures
+
+        existing_ts = {dep["timestamp"] for dep in departures}
+        today = date.today()
+
+        for days_ahead in range(1, 15):
+            if not needs_more:
+                break
+            date_str = (today + timedelta(days=days_ahead)).strftime("%Y%m%d")
+            responses = await asyncio.gather(
+                *[_fetch_stop_stoptimes(self._session, sid, date_str) for sid in stop_ids],
+                return_exceptions=True,
+            )
+            scheduled_raw = [e for r in responses if isinstance(r, list) for e in r]
+            new_deps = [
+                dep
+                for dep in _parse_departures(scheduled_raw, self._stop_filter, self._direction_filter)
+                if dep["timestamp"] not in existing_ts
+            ]
+            for dep in new_deps:
+                dep["from_calendar"] = True
+                existing_ts.add(dep["timestamp"])
+                departures.append(dep)
+            needs_more = {pair for pair in needs_more if _counts(departures).get(pair, 0) < NB_SLOTS}
+
+        # Non-timepoint fallback: use ficheHoraires which returns full timetables including
+        # stops with no static GTFS timepoints.
+        if needs_more:
+            _LOGGER.debug("ficheHoraires fallback for: %s", needs_more)
+            stop_ids_set = set(stop_ids)
+            lines_needing = {line for line, _ in needs_more}
+
+            for days_ahead in range(1, 15):
+                if not needs_more:
+                    break
+                future_date = today + timedelta(days=days_ahead)
+                service_day_ms = int(datetime(
+                    future_date.year, future_date.month, future_date.day,
+                    tzinfo=timezone.utc,
+                ).timestamp() * 1000)
+                service_day_unix = service_day_ms // 1000
+
+                for line in list(lines_needing):
+                    dirs_needing = {d for l, d in needs_more if l == line}
+                    if not dirs_needing:
+                        lines_needing.discard(line)
+                        continue
+                    try:
+                        async with self._session.get(
+                            f"{BASE_URL}/api/ficheHoraires/json",
+                            params={
+                                "route": f"SEM:{line}",
+                                "time": service_day_ms,
+                                "nbTrips": NB_SLOTS + 2,
+                            },
+                            headers={"Origin": ORIGIN_HEADER},
+                        ) as resp:
+                            fiche = await resp.json(content_type=None) if resp.status == 200 else {}
+                    except Exception:
+                        fiche = {}
+                    if not fiche:
+                        continue
+
+                    # Map ficheHoraires directions to tracked directions.
+                    # First, match by exact last-stop name; then assign remainder by order.
+                    unmatched_dirs = list(dirs_needing)
+                    dir_mapping: dict[str, str] = {}
+                    for fk, fd in fiche.items():
+                        arrets = fd.get("arrets", [])
+                        if not arrets:
+                            continue
+                        last_name = arrets[-1].get("name", "")
+                        if last_name in unmatched_dirs:
+                            dir_mapping[fk] = last_name
+                            unmatched_dirs.remove(last_name)
+                    remaining_fiche = [k for k in fiche if k not in dir_mapping]
+                    for fk, td in zip(remaining_fiche, unmatched_dirs):
+                        dir_mapping[fk] = td
+
+                    for fk, direction in dir_mapping.items():
+                        if _counts(departures).get((line, direction), 0) >= NB_SLOTS:
+                            continue
+                        fd = fiche[fk]
+                        arrets = fd.get("arrets", [])
+                        n_trips = len(fd.get("trips", []))
+                        cluster_arret = next(
+                            (a for a in arrets if a.get("stopId") in stop_ids_set), None
+                        )
+                        if cluster_arret is None:
+                            continue
+                        for trip_time in cluster_arret.get("trips", [])[:n_trips]:
+                            if trip_time is None:
+                                continue
+                            absolute_ts = service_day_unix + trip_time
+                            if absolute_ts in existing_ts:
+                                continue
+                            departures.append({
+                                "timestamp": absolute_ts,
+                                "line": line,
+                                "direction": direction,
+                                "delay_minutes": 0,
+                                "realtime": False,
+                                "occupancy": None,
+                                "stop_name": cluster_arret.get("name", ""),
+                                "from_calendar": True,
+                            })
+                            existing_ts.add(absolute_ts)
+
+                needs_more = {pair for pair in needs_more if _counts(departures).get(pair, 0) < NB_SLOTS}
+
+        return sorted(departures, key=lambda d: d["timestamp"])
+
 
 
 def _parse_departures(

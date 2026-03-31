@@ -9,4 +9,5 @@ CONF_STOP_FILTER = "stop_filter"
 CONF_DIRECTION_FILTER = "direction_filter"
 CONF_AVAILABLE_DIRECTIONS = "available_directions"
 
+NB_SLOTS = 3
 DEFAULT_SCAN_INTERVAL = 60
