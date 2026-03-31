@@ -35,15 +35,8 @@ async def async_setup_entry(
 
     if direction_filter:
         directions = {d: available_directions.get(d, d) for d in direction_filter}
-    elif available_directions:
-        directions = available_directions
     else:
-        # Fallback for old entries without CONF_AVAILABLE_DIRECTIONS
-        directions = {
-            dep["direction"]: dep["direction"]
-            for dep in (coordinator.data or [])
-            if dep.get("direction")
-        }
+        directions = available_directions
 
     async_add_entities(
         MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, direction, label, i)
