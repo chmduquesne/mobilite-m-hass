@@ -13,6 +13,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import (
     BASE_URL,
+    CONF_AVAILABLE_DIRECTIONS,
     CONF_CLUSTER_CODE,
     CONF_CLUSTER_NAME,
     CONF_DIRECTION_FILTER,
@@ -128,6 +129,7 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_CLUSTER_NAME: self._selected_cluster_name,
                     CONF_STOP_FILTER: self._selected_stop_filter,
                     CONF_DIRECTION_FILTER: direction_filter,
+                    CONF_AVAILABLE_DIRECTIONS: self._available_directions,
                 },
             )
 

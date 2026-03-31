@@ -15,7 +15,6 @@ from .const import (
     BASE_URL,
     CONF_CLUSTER_CODE,
     CONF_DIRECTION_FILTER,
-    CONF_NB_DEPARTURES,
     CONF_STOP_FILTER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -60,7 +59,6 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         self._cluster_code = entry.data[CONF_CLUSTER_CODE]
         self._stop_filter: list[str] = entry.data.get(CONF_STOP_FILTER, [])
         self._direction_filter: list[str] = entry.data.get(CONF_DIRECTION_FILTER, [])
-        self.nb_departures: int = entry.data.get(CONF_NB_DEPARTURES, 3)
 
     async def _async_update_data(self) -> list[dict]:
         """Fetch next departures from the API."""

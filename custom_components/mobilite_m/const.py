@@ -8,7 +8,6 @@ CONF_CLUSTER_NAME = "cluster_name"
 CONF_STOP_FILTER = "stop_filter"
 CONF_ROUTE_FILTER = "route_filter"
 CONF_DIRECTION_FILTER = "direction_filter"
-CONF_NB_DEPARTURES = "nb_departures"
+CONF_AVAILABLE_DIRECTIONS = "available_directions"
 
-DEFAULT_NB_DEPARTURES = 3
 DEFAULT_SCAN_INTERVAL = 60

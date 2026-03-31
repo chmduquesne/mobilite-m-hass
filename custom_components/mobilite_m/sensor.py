@@ -1,4 +1,4 @@
-"""Sensor platform for Mobilités-M: next departure timestamps."""
+"""Sensor platform for Mobilités-M: next departure timestamps per direction."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,8 +9,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CLUSTER_NAME, CONF_NB_DEPARTURES, DOMAIN
+from .const import (
+    CONF_AVAILABLE_DIRECTIONS,
+    CONF_CLUSTER_NAME,
+    CONF_DIRECTION_FILTER,
+    DOMAIN,
+)
 from . import MobiliteMCoordinator
+
+_NB_SLOTS = 3
 
 
 async def async_setup_entry(
@@ -21,16 +28,32 @@ async def async_setup_entry(
     """Set up departure sensors from a config entry."""
     coordinator: MobiliteMCoordinator = hass.data[DOMAIN][entry.entry_id]
     cluster_name: str = entry.data[CONF_CLUSTER_NAME]
-    nb: int = entry.data.get(CONF_NB_DEPARTURES, 3)
+
+    direction_filter: list[str] = entry.data.get(CONF_DIRECTION_FILTER, [])
+    # {desc: label} e.g. {"Montfleury": "17 → Montfleury"}
+    available_directions: dict[str, str] = entry.data.get(CONF_AVAILABLE_DIRECTIONS, {})
+
+    if direction_filter:
+        directions = {d: available_directions.get(d, d) for d in direction_filter}
+    elif available_directions:
+        directions = available_directions
+    else:
+        # Fallback for old entries without CONF_AVAILABLE_DIRECTIONS
+        directions = {
+            dep["direction"]: dep["direction"]
+            for dep in (coordinator.data or [])
+            if dep.get("direction")
+        }
 
     async_add_entities(
-        MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, i)
-        for i in range(nb)
+        MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, direction, label, i)
+        for direction, label in directions.items()
+        for i in range(_NB_SLOTS)
     )
 
 
 class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
-    """Sensor representing the n-th next departure at a stop cluster."""
+    """Sensor representing the n-th next departure for a specific direction."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_has_entity_name = True
@@ -40,12 +63,16 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
         coordinator: MobiliteMCoordinator,
         entry_id: str,
         cluster_name: str,
+        direction: str,
+        label: str,
         index: int,
     ) -> None:
         super().__init__(coordinator)
+        self._direction = direction
+        self._label = label
         self._index = index
         self._cluster_name = cluster_name
-        self._attr_unique_id = f"{entry_id}_departure_{index}"
+        self._attr_unique_id = f"{entry_id}_{direction}_{index}"
 
     @property
     def device_info(self):
@@ -56,35 +83,32 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
             "model": "Stop cluster",
         }
 
+    def _departures_for_direction(self) -> list[dict]:
+        return [
+            dep
+            for dep in (self.coordinator.data or [])
+            if dep.get("direction") == self._direction
+        ]
+
     @property
     def name(self) -> str:
-        """Return sensor name including line and direction from current data."""
-        departures: list[dict] = self.coordinator.data or []
-        if self._index >= len(departures):
-            return f"Départ {self._index + 1}"
-        dep = departures[self._index]
-        line = dep.get("line", "")
-        direction = dep.get("direction", "")
-        if line and direction:
-            return f"{line} → {direction}"
-        return f"Départ {self._index + 1}"
+        if self._index == 0:
+            return self._label
+        return f"{self._label} {self._index + 1}"
 
     @property
     def native_value(self) -> datetime | None:
-        """Return the departure time as an aware datetime."""
-        departures: list[dict] = self.coordinator.data or []
-        if self._index >= len(departures):
+        deps = self._departures_for_direction()
+        if self._index >= len(deps):
             return None
-        ts = departures[self._index]["timestamp"]
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
+        return datetime.fromtimestamp(deps[self._index]["timestamp"], tz=timezone.utc)
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Return line, direction, delay, realtime flag, occupancy, stop name."""
-        departures: list[dict] = self.coordinator.data or []
-        if self._index >= len(departures):
+        deps = self._departures_for_direction()
+        if self._index >= len(deps):
             return {}
-        dep = departures[self._index]
+        dep = deps[self._index]
         return {
             "line": dep.get("line"),
             "direction": dep.get("direction"),
