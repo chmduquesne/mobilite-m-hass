@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
+from yarl import URL
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -12,8 +14,9 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     BASE_URL,
     CONF_CLUSTER_CODE,
+    CONF_DIRECTION_FILTER,
     CONF_NB_DEPARTURES,
-    CONF_ROUTE_FILTER,
+    CONF_STOP_FILTER,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     ORIGIN_HEADER,
@@ -55,66 +58,77 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         )
         self._session = async_get_clientsession(hass)
         self._cluster_code = entry.data[CONF_CLUSTER_CODE]
-        self._route_filter: list[str] = entry.data.get(CONF_ROUTE_FILTER, [])
+        self._stop_filter: list[str] = entry.data.get(CONF_STOP_FILTER, [])
+        self._direction_filter: list[str] = entry.data.get(CONF_DIRECTION_FILTER, [])
         self.nb_departures: int = entry.data.get(CONF_NB_DEPARTURES, 3)
 
     async def _async_update_data(self) -> list[dict]:
         """Fetch next departures from the API."""
         url = f"{BASE_URL}/api/routers/default/index/clusters/{self._cluster_code}/stoptimes"
-        params = {}
-        if self._route_filter:
-            params["route"] = ",".join(self._route_filter)
 
         try:
+            _LOGGER.debug("Fetching departures from %s", url)
             async with self._session.get(
-                url,
-                params=params,
+                URL(url, encoded=True),
                 headers={"Origin": ORIGIN_HEADER},
             ) as resp:
                 if resp.status == 204:
                     return []
                 if resp.status != 200:
-                    raise UpdateFailed(f"API returned status {resp.status}")
+                    body = await resp.text()
+                    raise UpdateFailed(f"API returned status {resp.status}: {body}")
                 data = await resp.json(content_type=None)
         except UpdateFailed:
             raise
         except Exception as err:
             raise UpdateFailed(f"Error fetching departures: {err}") from err
 
-        return _parse_departures(data)
+        return _parse_departures(data, self._stop_filter, self._direction_filter)
 
 
-def _parse_departures(raw: list[dict]) -> list[dict]:
-    """Parse and flatten the stoptimes response into a sorted departure list."""
+def _parse_departures(
+    raw: list[dict],
+    stop_filter: list[str] | None = None,
+    direction_filter: list[str] | None = None,
+) -> list[dict]:
+    """Parse and flatten the stoptimes response into a sorted departure list.
+
+    Response format: [{pattern: {id, desc, ...}, times: [{stopId, stopName,
+    scheduledDeparture, realtimeDeparture, departureDelay, realtime, serviceDay, ...}]}]
+    Line name is the second segment of the pattern id (e.g. "SEM:D:1:..." -> "D").
+    """
+    stop_set = set(stop_filter) if stop_filter else None
+    direction_set = set(direction_filter) if direction_filter else None
     departures = []
-    for stop_entry in raw:
-        stop_name = stop_entry.get("stop", {}).get("name", "")
-        for pattern_entry in stop_entry.get("times", []):
-            route_short = pattern_entry.get("pattern", {}).get("route", {}).get("shortName", "")
-            headsign = pattern_entry.get("pattern", {}).get("desc", "")
-            for time_entry in pattern_entry.get("times", []):
-                realtime = time_entry.get("realtime", False)
-                scheduled = time_entry.get("scheduledDeparture", 0)
-                realtime_departure = time_entry.get("realtimeDeparture", scheduled)
-                service_day = time_entry.get("serviceDay", 0)
-                occupancy = time_entry.get("occupancyStatus", None)
+    for entry in raw:
+        pattern = entry.get("pattern", {})
+        pattern_id = pattern.get("id", "")
+        parts = pattern_id.split(":")
+        line = parts[1] if len(parts) > 1 else pattern_id
+        direction = pattern.get("desc", "")
+        if direction_set and direction not in direction_set:
+            continue
 
-                # serviceDay is midnight UTC of the service day (unix seconds)
-                # scheduledDeparture / realtimeDeparture are seconds since midnight
-                departure_ts = service_day + realtime_departure
-                delay_seconds = realtime_departure - scheduled
+        for time_entry in entry.get("times", []):
+            if stop_set and time_entry.get("stopId") not in stop_set:
+                continue
+            service_day = time_entry.get("serviceDay", 0)
+            scheduled = time_entry.get("scheduledDeparture", 0)
+            realtime_departure = time_entry.get("realtimeDeparture", scheduled)
+            departure_ts = service_day + realtime_departure
+            delay_seconds = time_entry.get("departureDelay", 0)
 
-                departures.append(
-                    {
-                        "timestamp": departure_ts,
-                        "line": route_short,
-                        "direction": headsign,
-                        "delay_minutes": round(delay_seconds / 60),
-                        "realtime": realtime,
-                        "occupancy": occupancy,
-                        "stop_name": stop_name,
-                    }
-                )
+            departures.append(
+                {
+                    "timestamp": departure_ts,
+                    "line": line,
+                    "direction": direction,
+                    "delay_minutes": round(delay_seconds / 60),
+                    "realtime": time_entry.get("realtime", False),
+                    "occupancy": time_entry.get("occupancyStatus"),
+                    "stop_name": time_entry.get("stopName", ""),
+                }
+            )
 
     departures.sort(key=lambda d: d["timestamp"])
     return departures

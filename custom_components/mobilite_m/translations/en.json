@@ -15,12 +15,18 @@
           "cluster": "Stop cluster"
         }
       },
-      "select_routes": {
-        "title": "Filter routes",
-        "description": "Choose the transit lines to monitor (leave empty for all lines) and how many upcoming departures to display.",
+      "select_stops": {
+        "title": "Filter stops",
+        "description": "Select the stop poles to monitor (leave empty for all stops).",
         "data": {
-          "route_filter": "Lines (optional)",
-          "nb_departures": "Number of upcoming departures"
+          "stop_filter": "Stops (optional)"
+        }
+      },
+      "select_directions": {
+        "title": "Filter directions",
+        "description": "Choose the directions to monitor (leave empty for all directions).",
+        "data": {
+          "direction_filter": "Directions (optional)"
         }
       }
     },

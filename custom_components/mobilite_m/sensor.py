@@ -46,8 +46,6 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
         self._index = index
         self._cluster_name = cluster_name
         self._attr_unique_id = f"{entry_id}_departure_{index}"
-        self._attr_name = f"Départ {index + 1}"
-        self._attr_translation_key = "departure"
 
     @property
     def device_info(self):
@@ -57,6 +55,19 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
             "manufacturer": "Mobilités-M",
             "model": "Stop cluster",
         }
+
+    @property
+    def name(self) -> str:
+        """Return sensor name including line and direction from current data."""
+        departures: list[dict] = self.coordinator.data or []
+        if self._index >= len(departures):
+            return f"Départ {self._index + 1}"
+        dep = departures[self._index]
+        line = dep.get("line", "")
+        direction = dep.get("direction", "")
+        if line and direction:
+            return f"{line} → {direction}"
+        return f"Départ {self._index + 1}"
 
     @property
     def native_value(self) -> datetime | None:

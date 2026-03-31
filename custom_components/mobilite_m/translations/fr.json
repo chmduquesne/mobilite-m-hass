@@ -15,12 +15,18 @@
           "cluster": "Zone d'arrêt"
         }
       },
-      "select_routes": {
-        "title": "Filtrer les lignes",
-        "description": "Choisissez les lignes à surveiller (laissez vide pour toutes les lignes) et le nombre de prochains départs à afficher.",
+      "select_stops": {
+        "title": "Filtrer les arrêts",
+        "description": "Sélectionnez les poteaux d'arrêt à surveiller (laissez vide pour tous les poteaux).",
         "data": {
-          "route_filter": "Lignes (optionnel)",
-          "nb_departures": "Nombre de prochains départs"
+          "stop_filter": "Arrêts (optionnel)"
+        }
+      },
+      "select_directions": {
+        "title": "Filtrer les directions",
+        "description": "Choisissez les directions à surveiller (laissez vide pour toutes les directions).",
+        "data": {
+          "direction_filter": "Directions (optionnel)"
         }
       }
     },
