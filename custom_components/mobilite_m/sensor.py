@@ -158,7 +158,11 @@ class MobiliteMStopSensor(CoordinatorEntity, SensorEntity):
         deps = self.coordinator.data or []
         if not deps:
             return None
-        return deps[0].get("stop_id") or None
+        stop_id = deps[0].get("stop_id") or ""
+        if not stop_id:
+            return None
+        name = self.coordinator.stop_names.get(stop_id, "")
+        return f"{name} ({stop_id})" if name else stop_id
 
     @property
     def extra_state_attributes(self) -> dict:
