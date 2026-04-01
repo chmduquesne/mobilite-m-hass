@@ -181,11 +181,23 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         results: dict[str, str] = {}
         for feature in data.get("features", []):
             props = feature.get("properties", {})
+            if not props.get("visible", True):
+                continue
             code = props.get("code") or props.get("id")
             name = props.get("name")
             city = props.get("city", "")
             if code and name:
                 results[code] = f"{name} ({city})" if city else name
+
+        # Append cluster code to labels that are not unique after visibility filtering
+        seen: dict[str, list[str]] = {}
+        for code, label in results.items():
+            seen.setdefault(label, []).append(code)
+        for label, codes in seen.items():
+            if len(codes) > 1:
+                for code in codes:
+                    results[code] = f"{label} [{code}]"
+
         return results
 
     async def _fetch_stops(self, cluster_code: str) -> dict[str, str]:

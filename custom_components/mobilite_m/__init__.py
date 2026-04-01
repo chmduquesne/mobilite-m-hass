@@ -200,7 +200,10 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
                     for trip_time in cluster_arret.get("trips", [])[:n_trips]:
                         if trip_time is None:
                             continue
-                        absolute_ts = service_day_unix + trip_time
+                        try:
+                            absolute_ts = service_day_unix + int(trip_time)
+                        except (ValueError, TypeError):
+                            continue
                         if absolute_ts in existing_ts:
                             continue
                         departures.append({
