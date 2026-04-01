@@ -222,7 +222,11 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return seen
 
     def _compute_destinations(self) -> dict[str, str]:
+        mode_set = set(self._selected_modes)
         route_set = set(self._selected_lines)
+        route_modes: dict[str, str] = {
+            r["id"]: r.get("mode", "") for r in self._routes_data if r.get("id")
+        }
         pairs: dict[tuple[str, str], None] = {}
         for stop_patterns in self._patterns_data.values():
             for pattern in stop_patterns:
@@ -230,6 +234,10 @@ class MobiliteMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 line = pid.split(":")[1] if ":" in pid else ""
                 desc = pattern.get("desc", "")
                 if not line or not desc:
+                    continue
+                route_id = ":".join(pid.split(":")[:2])
+                mode = route_modes.get(route_id, "")
+                if mode_set and mode not in mode_set:
                     continue
                 if route_set and line not in route_set:
                     continue
