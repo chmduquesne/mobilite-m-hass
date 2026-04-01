@@ -15,18 +15,25 @@
           "cluster": "Zone d'arrêt"
         }
       },
-      "select_stops": {
-        "title": "Filtrer les arrêts",
-        "description": "Sélectionnez les poteaux d'arrêt à surveiller (laissez vide pour tous les poteaux).",
+      "select_modes": {
+        "title": "Filtrer par mode de transport",
+        "description": "Sélectionnez les modes de transport à surveiller (laissez vide pour tous les modes).",
         "data": {
-          "stop_filter": "Arrêts (optionnel)"
+          "modes": "Modes (optionnel)"
         }
       },
-      "select_directions": {
-        "title": "Filtrer les directions",
-        "description": "Choisissez les directions à surveiller (laissez vide pour toutes les directions).",
+      "select_lines": {
+        "title": "Filtrer par ligne",
+        "description": "Sélectionnez les lignes à surveiller (laissez vide pour toutes les lignes).",
         "data": {
-          "direction_filter": "Directions (optionnel)"
+          "lines": "Lignes (optionnel)"
+        }
+      },
+      "select_destinations": {
+        "title": "Filtrer par destination",
+        "description": "Sélectionnez les destinations à surveiller (laissez vide pour toutes les destinations).",
+        "data": {
+          "destinations": "Destinations (optionnel)"
         }
       }
     },
@@ -36,7 +43,7 @@
       "cannot_connect": "Impossible de se connecter à l'API Mobilités-M."
     },
     "abort": {
-      "already_configured": "Cette zone d'arrêt (avec ce filtre de lignes) est déjà configurée."
+      "already_configured": "Cette zone d'arrêt (avec ce filtre) est déjà configurée."
     }
   }
 }

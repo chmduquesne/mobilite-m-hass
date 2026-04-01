@@ -15,18 +15,25 @@
           "cluster": "Stop cluster"
         }
       },
-      "select_stops": {
-        "title": "Filter stops",
-        "description": "Select the stop poles to monitor (leave empty for all stops).",
+      "select_modes": {
+        "title": "Filter by transport mode",
+        "description": "Select the transport modes to monitor (leave empty for all modes).",
         "data": {
-          "stop_filter": "Stops (optional)"
+          "modes": "Modes (optional)"
         }
       },
-      "select_directions": {
-        "title": "Filter directions",
-        "description": "Choose the directions to monitor (leave empty for all directions).",
+      "select_lines": {
+        "title": "Filter by line",
+        "description": "Select the lines to monitor (leave empty for all lines).",
         "data": {
-          "direction_filter": "Directions (optional)"
+          "lines": "Lines (optional)"
+        }
+      },
+      "select_destinations": {
+        "title": "Filter by destination",
+        "description": "Select the destinations to monitor (leave empty for all destinations).",
+        "data": {
+          "destinations": "Destinations (optional)"
         }
       }
     },
@@ -36,7 +43,7 @@
       "cannot_connect": "Unable to connect to the Mobilités-M API."
     },
     "abort": {
-      "already_configured": "This stop cluster (with this line filter) is already configured."
+      "already_configured": "This stop cluster (with this filter) is already configured."
     }
   }
 }

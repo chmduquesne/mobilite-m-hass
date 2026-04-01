@@ -1,4 +1,4 @@
-"""Sensor platform for Mobilités-M: next departure timestamps per direction."""
+"""Sensor platform for Mobilités-M: next departures across all tracked directions."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -9,14 +9,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import (
-    CONF_AVAILABLE_DIRECTIONS,
-    CONF_CLUSTER_NAME,
-    CONF_DIRECTION_FILTER,
-    DOMAIN,
-    NB_SLOTS,
-)
+from .const import CONF_CLUSTER_NAME, DOMAIN, NB_SLOTS
 from . import MobiliteMCoordinator
+
+_MODE_ICONS: dict[str, str] = {
+    "BUS": "mdi:bus",
+    "TRAM": "mdi:tram",
+    "RAIL": "mdi:train",
+    "SUBWAY": "mdi:subway",
+    "FERRY": "mdi:ferry",
+    "FUNICULAR": "mdi:ski-lift",
+    "CABLE_CAR": "mdi:gondola",
+}
 
 
 async def async_setup_entry(
@@ -26,26 +30,21 @@ async def async_setup_entry(
 ) -> None:
     """Set up departure sensors from a config entry."""
     coordinator: MobiliteMCoordinator = hass.data[DOMAIN][entry.entry_id]
-    cluster_name: str = entry.data[CONF_CLUSTER_NAME]
-
-    direction_filter: list[str] = entry.data.get(CONF_DIRECTION_FILTER, [])
-    # {desc: label} e.g. {"Montfleury": "17 → Montfleury"}
-    available_directions: dict[str, str] = entry.data.get(CONF_AVAILABLE_DIRECTIONS, {})
-
-    if direction_filter:
-        directions = {d: available_directions.get(d, d) for d in direction_filter}
-    else:
-        directions = available_directions
-
-    async_add_entities(
-        MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, direction, label, i)
-        for direction, label in directions.items()
+    cluster_name: str = entry.title
+    entities: list = [
+        MobiliteMDepartureSensor(coordinator, entry.entry_id, cluster_name, i)
         for i in range(NB_SLOTS)
-    )
+    ]
+    entities.append(MobiliteMStopSensor(coordinator, entry.entry_id, cluster_name))
+    entities.append(MobiliteMLineSensor(coordinator, entry.entry_id, cluster_name))
+    entities.append(MobiliteMOriginSensor(coordinator, entry.entry_id, cluster_name))
+    entities.append(MobiliteMDestinationSensor(coordinator, entry.entry_id, cluster_name))
+    entities.append(MobiliteMSourceSensor(coordinator, entry.entry_id, cluster_name))
+    async_add_entities(entities)
 
 
 class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
-    """Sensor representing the n-th next departure for a specific direction."""
+    """Sensor representing the n-th next departure across all tracked directions."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_has_entity_name = True
@@ -55,58 +54,65 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
         coordinator: MobiliteMCoordinator,
         entry_id: str,
         cluster_name: str,
-        direction: str,
-        label: str,
         index: int,
     ) -> None:
         super().__init__(coordinator)
-        self._direction = direction
-        self._label = label
         self._index = index
         self._cluster_name = cluster_name
-        self._attr_unique_id = f"{entry_id}_{direction}_{index}"
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_{index}"
+
+    def _dep(self) -> dict | None:
+        deps = self.coordinator.data or []
+        return deps[self._index] if self._index < len(deps) else None
 
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self.coordinator.name)},
+            "identifiers": {(DOMAIN, self._entry_id)},
             "name": self._cluster_name,
             "manufacturer": "Mobilités-M",
             "model": "Stop cluster",
         }
 
-    def _departures_for_direction(self) -> list[dict]:
-        line, _, desc = self._direction.partition("|")
-        return [
-            dep
-            for dep in (self.coordinator.data or [])
-            if dep.get("line") == line and dep.get("direction") == desc
-        ]
+    @property
+    def icon(self) -> str:
+        dep = self._dep()
+        if dep:
+            mode = self.coordinator.route_modes.get(dep.get("line", ""), "")
+            return _MODE_ICONS.get(mode, "mdi:bus")
+        return "mdi:bus"
 
     @property
     def name(self) -> str:
-        deps = self._departures_for_direction()
-        if self._index < len(deps) and deps[self._index].get("from_calendar"):
-            suffix = " (scheduled)"
-        else:
-            suffix = ""
         if self._index == 0:
-            return f"{self._label}{suffix}"
-        return f"{self._label} {self._index + 1}{suffix}"
+            return "Departure"
+        dep = self._dep()
+        label = f"Departure +{self._index}"
+        if dep:
+            line = dep.get("line", "")
+            direction = dep.get("direction", "")
+            if dep.get("from_calendar"):
+                badge = " 📅"
+            elif dep.get("realtime"):
+                badge = " 🔴"
+            else:
+                badge = ""
+            return f"{label} · {line} → {direction}{badge}"
+        return label
 
     @property
     def native_value(self) -> datetime | None:
-        deps = self._departures_for_direction()
-        if self._index >= len(deps):
+        dep = self._dep()
+        if dep is None:
             return None
-        return datetime.fromtimestamp(deps[self._index]["timestamp"], tz=timezone.utc)
+        return datetime.fromtimestamp(dep["timestamp"], tz=timezone.utc)
 
     @property
     def extra_state_attributes(self) -> dict:
-        deps = self._departures_for_direction()
-        if self._index >= len(deps):
+        dep = self._dep()
+        if dep is None:
             return {}
-        dep = deps[self._index]
         return {
             "line": dep.get("line"),
             "direction": dep.get("direction"),
@@ -115,3 +121,290 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
             "occupancy": dep.get("occupancy"),
             "stop_name": dep.get("stop_name"),
         }
+
+
+class MobiliteMStopSensor(CoordinatorEntity, SensorEntity):
+    """Sensor exposing the stop pole coordinates of the next departure."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bus-stop-covered"
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_stop"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    @property
+    def name(self) -> str:
+        return "Stop"
+
+    @property
+    def native_value(self) -> str | None:
+        deps = self.coordinator.data or []
+        if not deps:
+            return None
+        return deps[0].get("stop_id") or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        deps = self.coordinator.data or []
+        if not deps:
+            return {}
+        stop_id = deps[0].get("stop_id", "")
+        coords = self.coordinator.stop_coords.get(stop_id)
+        if coords is None:
+            return {}
+        return {
+            "latitude": coords[0],
+            "longitude": coords[1],
+        }
+
+
+class MobiliteMLineSensor(CoordinatorEntity, SensorEntity):
+    """Sensor exposing the line of the next departure."""
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_line"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    _attr_icon = "mdi:ray-start-vertex-end"
+
+    @property
+    def name(self) -> str:
+        return "Line"
+
+    @property
+    def native_value(self) -> str | None:
+        deps = self.coordinator.data or []
+        if not deps:
+            return None
+        return deps[0].get("line") or None
+
+
+class MobiliteMStopLocationSensor(CoordinatorEntity, SensorEntity):
+    """Sensor representing a stop pole in the cluster, with fixed coordinates."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:map-marker"
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+        stop_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._stop_id = stop_id
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_stop_{stop_id}"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    @property
+    def name(self) -> str:
+        return self._stop_id
+
+    @property
+    def native_value(self) -> str | None:
+        return self.coordinator.stop_names.get(self._stop_id)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        coords = self.coordinator.stop_coords.get(self._stop_id)
+        if coords is None:
+            return {}
+        return {
+            "latitude": coords[0],
+            "longitude": coords[1],
+        }
+
+
+class MobiliteMOriginSensor(CoordinatorEntity, SensorEntity):
+    """Sensor exposing the origin stop of the next departure's route."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:ray-start"
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_origin"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    @property
+    def name(self) -> str:
+        return "Origin"
+
+    @property
+    def native_value(self) -> str | None:
+        deps = self.coordinator.data or []
+        if not deps:
+            return None
+        return deps[0].get("origin_name") or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        deps = self.coordinator.data or []
+        if not deps:
+            return {}
+        origin_id = deps[0].get("origin_stop_id", "")
+        if not origin_id:
+            return {}
+        coords = self.coordinator.stop_coords.get(origin_id) or self.coordinator.extra_stop_coords.get(origin_id)
+        if coords is None:
+            return {}
+        return {
+            "latitude": coords[0],
+            "longitude": coords[1],
+        }
+
+
+class MobiliteMDestinationSensor(CoordinatorEntity, SensorEntity):
+    """Sensor exposing the destination of the next departure."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:ray-end"
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_destination"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    @property
+    def name(self) -> str:
+        return "Destination"
+
+    @property
+    def native_value(self) -> str | None:
+        deps = self.coordinator.data or []
+        if not deps:
+            return None
+        return deps[0].get("direction") or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        deps = self.coordinator.data or []
+        if not deps:
+            return {}
+        dest_id = deps[0].get("destination_stop_id", "")
+        if not dest_id:
+            return {}
+        coords = self.coordinator.stop_coords.get(dest_id) or self.coordinator.extra_stop_coords.get(dest_id)
+        if coords is None:
+            return {}
+        return {
+            "latitude": coords[0],
+            "longitude": coords[1],
+        }
+
+
+class MobiliteMSourceSensor(CoordinatorEntity, SensorEntity):
+    """Sensor indicating whether the next departure comes from live tracking or the schedule."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:information-outline"
+
+    def __init__(
+        self,
+        coordinator: MobiliteMCoordinator,
+        entry_id: str,
+        cluster_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._cluster_name = cluster_name
+        self._entry_id = entry_id
+        self._attr_unique_id = f"{entry_id}_source"
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry_id)},
+            "name": self._cluster_name,
+            "manufacturer": "Mobilités-M",
+            "model": "Stop cluster",
+        }
+
+    @property
+    def name(self) -> str:
+        return "Source"
+
+    @property
+    def native_value(self) -> str | None:
+        deps = self.coordinator.data or []
+        if not deps:
+            return None
+        dep = deps[0]
+        if dep.get("from_calendar"):
+            return "📅 schedule"
+        return "🔴 live"
