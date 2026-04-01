@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_CLUSTER_NAME, DOMAIN, NB_SLOTS
+from .const import DOMAIN, NB_SLOTS
 from . import MobiliteMCoordinator
 
 _MODE_ICONS: dict[str, str] = {
@@ -218,52 +218,6 @@ class MobiliteMLineSensor(CoordinatorEntity, SensorEntity):
         return deps[0].get("line") or None
 
 
-class MobiliteMStopLocationSensor(CoordinatorEntity, SensorEntity):
-    """Sensor representing a stop pole in the cluster, with fixed coordinates."""
-
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:map-marker"
-
-    def __init__(
-        self,
-        coordinator: MobiliteMCoordinator,
-        entry_id: str,
-        cluster_name: str,
-        stop_id: str,
-    ) -> None:
-        super().__init__(coordinator)
-        self._stop_id = stop_id
-        self._cluster_name = cluster_name
-        self._entry_id = entry_id
-        self._attr_unique_id = f"{entry_id}_stop_{stop_id}"
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry_id)},
-            "name": self._cluster_name,
-            "manufacturer": "Mobilités-M",
-            "model": "Stop cluster",
-        }
-
-    @property
-    def name(self) -> str:
-        return self._stop_id
-
-    @property
-    def native_value(self) -> str | None:
-        return self.coordinator.stop_names.get(self._stop_id)
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        coords = self.coordinator.stop_coords.get(self._stop_id)
-        if coords is None:
-            return {}
-        return {
-            "latitude": coords[0],
-            "longitude": coords[1],
-        }
-
 
 class MobiliteMOriginSensor(CoordinatorEntity, SensorEntity):
     """Sensor exposing the origin stop of the next departure's route."""
@@ -320,7 +274,7 @@ class MobiliteMOriginSensor(CoordinatorEntity, SensorEntity):
         origin_id, _ = self._origin(deps[0])
         if not origin_id:
             return {}
-        coords = self.coordinator.stop_coords.get(origin_id) or self.coordinator.extra_stop_coords.get(origin_id)
+        coords = self.coordinator.stop_coords.get(origin_id)
         if coords is None:
             return {}
         return {
@@ -374,7 +328,7 @@ class MobiliteMDestinationSensor(CoordinatorEntity, SensorEntity):
         dest_id = deps[0].get("destination_stop_id", "")
         if not dest_id:
             return {}
-        coords = self.coordinator.stop_coords.get(dest_id) or self.coordinator.extra_stop_coords.get(dest_id)
+        coords = self.coordinator.stop_coords.get(dest_id)
         if coords is None:
             return {}
         return {
