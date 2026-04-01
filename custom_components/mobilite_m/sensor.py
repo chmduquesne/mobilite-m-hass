@@ -291,19 +291,29 @@ class MobiliteMOriginSensor(CoordinatorEntity, SensorEntity):
     def name(self) -> str:
         return "Origin"
 
+    def _origin(self, dep: dict) -> tuple[str, str]:
+        """Return (stop_id, name) for the origin of this departure."""
+        stop_id = dep.get("origin_stop_id", "")
+        name = dep.get("origin_name", "")
+        if not name:
+            key = (dep.get("line", ""), dep.get("direction", ""))
+            stop_id, name = self.coordinator.direction_origin.get(key, ("", ""))
+        return stop_id, name
+
     @property
     def native_value(self) -> str | None:
         deps = self.coordinator.data or []
         if not deps:
             return None
-        return deps[0].get("origin_name") or None
+        _, name = self._origin(deps[0])
+        return name or None
 
     @property
     def extra_state_attributes(self) -> dict:
         deps = self.coordinator.data or []
         if not deps:
             return {}
-        origin_id = deps[0].get("origin_stop_id", "")
+        origin_id, _ = self._origin(deps[0])
         if not origin_id:
             return {}
         coords = self.coordinator.stop_coords.get(origin_id) or self.coordinator.extra_stop_coords.get(origin_id)

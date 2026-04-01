@@ -70,6 +70,7 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         self._route_modes: dict[str, str] | None = None
         self._pattern_termini: dict[str, tuple[str, str, str]] = {}  # pid → (origin_id, origin_name, dest_id)
         self._extra_stop_coords: dict[str, tuple[float, float]] = {}
+        self._direction_origin: dict[tuple[str, str], tuple[str, str]] = {}  # (line, direction) → (stop_id, name)
 
     @property
     def route_modes(self) -> dict[str, str]:
@@ -113,6 +114,11 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
     def extra_stop_coords(self) -> dict[str, tuple[float, float]]:
         """Return coords for stops outside the cluster (e.g. route termini)."""
         return self._extra_stop_coords
+
+    @property
+    def direction_origin(self) -> dict[tuple[str, str], tuple[str, str]]:
+        """Return cached {(line, direction): (origin_stop_id, origin_name)} from ficheHoraires."""
+        return self._direction_origin
 
     async def _ensure_stops(self) -> None:
         """Fetch and cache stop IDs, coordinates, and names from the cluster GeoJSON."""
@@ -180,6 +186,35 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
                     if lat is not None and lon is not None:
                         self._extra_stop_coords[stop_id] = (lat, lon)
 
+    async def _ensure_direction_origins(self, pairs: set[tuple[str, str]]) -> None:
+        """Fetch ficheHoraires once per line to cache origin stop info for given (line, direction) pairs."""
+        lines_needed = {line for line, direction in pairs if (line, direction) not in self._direction_origin}
+        if not lines_needed:
+            return
+        today_ms = int(datetime(
+            *date.today().timetuple()[:3], tzinfo=timezone.utc
+        ).timestamp() * 1000)
+        for line in lines_needed:
+            try:
+                async with self._session.get(
+                    f"{BASE_URL}/api/ficheHoraires/json",
+                    params={"route": f"SEM:{line}", "time": today_ms, "nbTrips": 1},
+                    headers={"Origin": ORIGIN_HEADER},
+                ) as resp:
+                    fiche = await resp.json(content_type=None) if resp.status == 200 else {}
+            except Exception:
+                continue
+            for fd in fiche.values():
+                arrets = fd.get("arrets", [])
+                if not arrets:
+                    continue
+                last_name = arrets[-1].get("name", "")
+                if last_name:
+                    self._direction_origin[(line, last_name)] = (
+                        arrets[0].get("stopId", ""),
+                        arrets[0].get("name", ""),
+                    )
+
     async def _async_update_data(self) -> list[dict]:
         """Fetch next departures from the API, falling back to scheduled data if needed."""
         await self._ensure_route_modes()
@@ -203,6 +238,8 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error fetching departures: {err}") from err
 
         departures = _parse_departures(data, [], self._direction_filter)
+        pairs = {(dep["line"], dep["direction"]) for dep in departures if dep.get("line") and dep.get("direction")}
+        await self._ensure_direction_origins(pairs)
         pattern_ids = {dep["pattern_id"] for dep in departures if dep.get("pattern_id")}
         await self._ensure_pattern_termini(pattern_ids)
         for dep in departures:
@@ -280,6 +317,11 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
                         break
                     fd = fiche[fk]
                     arrets = fd.get("arrets", [])
+                    if arrets and (line, direction) not in self._direction_origin:
+                        self._direction_origin[(line, direction)] = (
+                            arrets[0].get("stopId", ""),
+                            arrets[0].get("name", ""),
+                        )
                     n_trips = len(fd.get("trips", []))
                     cluster_arret = next(
                         (a for a in arrets if a.get("stopId") in stop_ids_set), None
