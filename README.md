@@ -10,6 +10,7 @@ This integration is not official and is not affiliated with Mobilites-M or the G
 - Optional filtering by stop pole and direction
 - One sensor per departure slot per direction (3 upcoming departures per direction by default)
 - Sensors update every 60 seconds
+- Line metadata on the `Line` and departure sensors: color, text color, short and long names, mode and type
 
 ## Installation
 
@@ -21,6 +22,21 @@ Install via [HACS](https://hacs.xyz) by adding this repository as a custom repos
 2. Enter the name of a stop or stop cluster (minimum 3 characters).
 3. Select the matching cluster from the search results.
 4. Optionally filter by stop pole and direction.
+
+## Line metadata
+
+The `Line`, `Departure`, `Departure +1` and `Departure +2` sensors expose route
+metadata for the line they represent. Colors are normalized with a leading `#`
+so they can be used directly in Home Assistant templates or AWTRIX payloads.
+
+```yaml
+color: "#F5D24D"
+text_color: "#000000"
+short_name: C1
+long_name: Grenoble Cité Jean Macé / Montbonnot-Saint-Martin Pré de l'Eau
+mode: BUS
+type: CHRONO
+```
 
 ## Requirements
 

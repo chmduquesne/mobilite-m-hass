@@ -66,34 +66,57 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         self._stop_ids: list[str] | None = None
         self._stop_coords: dict[str, tuple[float, float]] | None = None
         self._stop_names: dict[str, str] | None = None
-        self._route_modes: dict[str, str] | None = None
+        self._route_metadata: dict[str, dict[str, str]] | None = None
         self._route_ids: dict[str, str] = {}  # {line: full_route_id} e.g. {"T65": "C38:T65"}
         self._direction_origin: dict[tuple[str, str], tuple[str, str]] = {}  # (line, direction) → (stop_id, name)
 
     @property
     def route_modes(self) -> dict[str, str]:
         """Return cached {line: mode} mapping."""
-        return self._route_modes or {}
+        return {
+            line: metadata.get("mode", "")
+            for line, metadata in (self._route_metadata or {}).items()
+        }
+
+    @property
+    def route_metadata(self) -> dict[str, dict[str, str]]:
+        """Return cached Home Assistant-ready metadata for each line."""
+        return self._route_metadata or {}
 
     async def _ensure_route_modes(self) -> None:
-        """Fetch and cache the transport mode for each line at this cluster."""
-        if self._route_modes is not None:
+        """Fetch and cache route metadata for each line at this cluster."""
+        if self._route_metadata is not None:
             return
         try:
             async with self._session.get(
                 f"{BASE_URL}/api/routers/default/index/clusters/{self._cluster_code}/routes",
                 headers={"Origin": ORIGIN_HEADER},
             ) as resp:
-                routes = await resp.json(content_type=None) if resp.status == 200 else []
-        except Exception:
-            routes = []
-        self._route_modes = {}
+                if resp.status != 200:
+                    _LOGGER.warning("Unable to fetch route metadata: API returned %s", resp.status)
+                    return
+                routes = await resp.json(content_type=None)
+        except Exception as err:
+            _LOGGER.warning("Unable to fetch route metadata: %s", err)
+            return
+
+        self._route_metadata = {}
         self._route_ids = {}
         for r in routes:
             rid = r.get("id", "")
             if rid and ":" in rid:
                 line = rid.split(":")[1]
-                self._route_modes[line] = r.get("mode", "")
+                metadata = {
+                    "color": _format_color(r.get("color")),
+                    "text_color": _format_color(r.get("textColor")),
+                    "short_name": r.get("shortName") or line,
+                    "long_name": r.get("longName"),
+                    "mode": r.get("mode"),
+                    "type": r.get("type"),
+                }
+                self._route_metadata[line] = {
+                    key: value for key, value in metadata.items() if value is not None
+                }
                 self._route_ids[line] = rid
 
     @property
@@ -305,6 +328,13 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
                         existing_ts.add(absolute_ts)
 
         return sorted(departures, key=lambda d: d["timestamp"])
+
+
+def _format_color(value: object) -> str | None:
+    """Format a route color for direct use in Home Assistant templates."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return f"#{value.strip().lstrip('#')}"
 
 
 def _parse_departures(
