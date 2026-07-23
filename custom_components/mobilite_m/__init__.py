@@ -74,7 +74,7 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
     def route_modes(self) -> dict[str, str]:
         """Return cached {line: mode} mapping."""
         return {
-            line: metadata.get("mode", "")
+            line: metadata.get("line_mode", "")
             for line, metadata in (self._route_metadata or {}).items()
         }
 
@@ -83,7 +83,7 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
         """Return cached Home Assistant-ready metadata for each line."""
         return self._route_metadata or {}
 
-    async def _ensure_route_modes(self) -> None:
+    async def _ensure_route_metadata(self) -> None:
         """Fetch and cache route metadata for each line at this cluster."""
         if self._route_metadata is not None:
             return
@@ -107,12 +107,12 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
             if rid and ":" in rid:
                 line = rid.split(":")[1]
                 metadata = {
-                    "color": _format_color(r.get("color")),
-                    "text_color": _format_color(r.get("textColor")),
-                    "short_name": r.get("shortName") or line,
-                    "long_name": r.get("longName"),
-                    "mode": r.get("mode"),
-                    "type": r.get("type"),
+                    "line_color": _format_color(r.get("color")),
+                    "line_text_color": _format_color(r.get("textColor")),
+                    "line_short_name": r.get("shortName") or line,
+                    "line_long_name": r.get("longName"),
+                    "line_mode": r.get("mode"),
+                    "line_type": r.get("type"),
                 }
                 self._route_metadata[line] = {
                     key: value for key, value in metadata.items() if value is not None
@@ -198,7 +198,7 @@ class MobiliteMCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self) -> list[dict]:
         """Fetch next departures from the API, falling back to scheduled data if needed."""
-        await self._ensure_route_modes()
+        await self._ensure_route_metadata()
         await self._ensure_stops()
         url = f"{BASE_URL}/api/routers/default/index/clusters/{self._cluster_code}/stoptimes"
         try:

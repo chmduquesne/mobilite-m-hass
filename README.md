@@ -10,7 +10,8 @@ This integration is not official and is not affiliated with Mobilites-M or the G
 - Optional filtering by stop pole and direction
 - One sensor per departure slot per direction (3 upcoming departures per direction by default)
 - Sensors update every 60 seconds
-- Line metadata on the `Line` and departure sensors: color, text color, short and long names, mode and type
+- Prefixed line metadata on the `Line` and departure sensors: color, text color, short and long names, mode and type
+- Short stop names on departure sensors for compact displays
 
 ## Installation
 
@@ -26,16 +27,27 @@ Install via [HACS](https://hacs.xyz) by adding this repository as a custom repos
 ## Line metadata
 
 The `Line`, `Departure`, `Departure +1` and `Departure +2` sensors expose route
-metadata for the line they represent. Colors are normalized with a leading `#`
-so they can be used directly in Home Assistant templates or AWTRIX payloads.
+metadata for the line they represent. All route-specific attributes use a
+`line_` prefix to distinguish them from stop and departure information. Colors
+are normalized with a leading `#` so they can be used directly in Home
+Assistant templates or AWTRIX payloads.
 
 ```yaml
-color: "#F5D24D"
-text_color: "#000000"
-short_name: C1
-long_name: Grenoble Cité Jean Macé / Montbonnot-Saint-Martin Pré de l'Eau
-mode: BUS
-type: CHRONO
+line_color: "#F5D24D"
+line_text_color: "#000000"
+line_short_name: C1
+line_long_name: Grenoble Cité Jean Macé / Montbonnot-Saint-Martin Pré de l'Eau
+line_mode: BUS
+line_type: CHRONO
+```
+
+Departure sensors also expose `stop_short_name`, sourced from the stop data
+already cached by the integration. The existing `stop_name` is preserved for
+backward compatibility:
+
+```yaml
+stop_name: Grenoble, Chavant
+stop_short_name: Chavant
 ```
 
 ## Requirements

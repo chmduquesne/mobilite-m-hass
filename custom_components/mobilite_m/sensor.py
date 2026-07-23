@@ -121,6 +121,9 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
             "occupancy": dep.get("occupancy"),
             "stop_name": dep.get("stop_name"),
         }
+        stop_id = dep.get("stop_id", "")
+        if stop_short_name := self.coordinator.stop_names.get(stop_id):
+            attributes["stop_short_name"] = stop_short_name
         attributes.update(self.coordinator.route_metadata.get(dep.get("line", ""), {}))
         return attributes
 
