@@ -113,7 +113,7 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
         dep = self._dep()
         if dep is None:
             return {}
-        return {
+        attributes = {
             "line": dep.get("line"),
             "direction": dep.get("direction"),
             "delay_minutes": dep.get("delay_minutes", 0),
@@ -121,6 +121,11 @@ class MobiliteMDepartureSensor(CoordinatorEntity, SensorEntity):
             "occupancy": dep.get("occupancy"),
             "stop_name": dep.get("stop_name"),
         }
+        stop_id = dep.get("stop_id", "")
+        if stop_short_name := self.coordinator.stop_names.get(stop_id):
+            attributes["stop_short_name"] = stop_short_name
+        attributes.update(self.coordinator.route_metadata.get(dep.get("line", ""), {}))
+        return attributes
 
 
 class MobiliteMStopSensor(CoordinatorEntity, SensorEntity):
@@ -216,6 +221,14 @@ class MobiliteMLineSensor(CoordinatorEntity, SensorEntity):
         if not deps:
             return None
         return deps[0].get("line") or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return metadata for the line of the next departure."""
+        deps = self.coordinator.data or []
+        if not deps:
+            return {}
+        return dict(self.coordinator.route_metadata.get(deps[0].get("line", ""), {}))
 
 
 
